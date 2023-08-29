@@ -1,0 +1,98 @@
+services:
+  mysql:
+    image: mysql:8.0.31
+    container_name: ruoyi-nbcio-mysql
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_general_ci
+      - --explicit_defaults_for_timestamp=true
+      - --lower_case_table_names=1
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ruoyi123
+      MYSQL_DATABASE: ruoyi-nbcio
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./script/docker/local/mysql/10-init-ruoyi.sh:/docker-entrypoint-initdb.d/10-init-ruoyi.sh:ro
+      - ./script/sql/mysql/ruoyi-nbcio-mysql5.7.sql:/tmp/ruoyi-nbcio-mysql5.7.sql:ro
+      - ./script/sql/mysql/dingtalk_attendance.sql:/tmp/dingtalk_attendance.sql:ro
+      - ./script/sql/mysql/financing_daily_detail.sql:/tmp/financing_daily_detail.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  redis:
+    image: redis:6.2.7
+    container_name: ruoyi-nbcio-redis
+    command: redis-server --appendonly yes --requirepass ruoyi123
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ruoyi123 ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    image: ruoyi-nbcio-backend:local
+    container_name: ruoyi-nbcio-backend
+    environment:
+      TZ: Asia/Shanghai
+      SERVER_PORT: 9060
+      SPRING_PROFILES_ACTIVE: prod
+      env: prod
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_URL: jdbc:mysql://mysql:3306/ruoyi-nbcio?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=GMT%2B8&autoReconnect=true&rewriteBatchedStatements=true&nullCatalogMeansCurrent=true
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_USERNAME: root
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_PASSWORD: ruoyi123
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ruoyi123
+      SPRING_BOOT_ADMIN_CLIENT_ENABLED: "false"
+      XXL_JOB_ENABLED: "false"
+      FLOWABLE_MESSAGE_BASE_URL: http://localhost:9666/workflow/process/detail/
+      NBCIO_LOCALFILEHTTP: http://localhost:9060
+      RUOYI_PROFILE: /app/upload
+      SPRING_SERVLET_MULTIPART_LOCATION: /tmp
+      JAVA_OPTS: -Xms512m -Xmx1024m
+    ports:
+      - "9060:9060"
+    volumes:
+      - backend_upload:/app/upload
+      - backend_logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    image: ruoyi-nbcio-web:local
+    container_name: ruoyi-nbcio-web
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "9666:80"
+    depends_on:
+      - backend
+
+volumes:
+  mysql_data:
+  redis_data:
+  backend_upload:
+  backend_logs:
